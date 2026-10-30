@@ -1,0 +1,64 @@
+name: Build WebDriverAgentRunner ipa
+
+# Builds an unsigned WebDriverAgentRunner.ipa on a GitHub-hosted macOS runner.
+# The WebDriverAgent sources are checked out from appium/WebDriverAgent, so this
+# repo only needs to contain this workflow file.
+#
+# Unsigned on purpose: Sideloadly re-signs every bundle with your own Apple ID.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout WebDriverAgent
+        uses: actions/checkout@v4
+        with:
+          repository: appium/WebDriverAgent
+          path: wda
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Build for testing (unsigned)
+        working-directory: wda
+        run: |
+          set -euo pipefail
+          xcodebuild build-for-testing \
+            -project WebDriverAgent.xcodeproj \
+            -scheme WebDriverAgentRunner \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath ./out \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: Package as ipa
+        working-directory: wda
+        run: |
+          set -euo pipefail
+          APP=$(find out/Build/Products -name 'WebDriverAgentRunner-Runner.app' -type d | head -1)
+          if [ -z "$APP" ]; then
+            echo "::error::runner bundle not found"
+            find out/Build/Products -maxdepth 3 -type d
+            exit 1
+          fi
+          echo "runner: $APP"
+          rm -rf Payload && mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qry WebDriverAgentRunner.ipa Payload
+          ls -lh WebDriverAgentRunner.ipa
+
+      - name: Upload ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: WebDriverAgentRunner-ipa
+          path: wda/WebDriverAgentRunner.ipa
+          if-no-files-found: error
